@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tower Defense</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #game-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #game-container {
+            position: relative;
+        }
+        table {
+            border-collapse: collapse;
+        }
+        td {
+            width: 40px;
+            height: 40px;
+            border: 1px solid black;
+            text-align: center;
+        }
+        .path {
+            background-color: #ccc;
+        }
+        .tower {
+            background-color: blue;
+        }
+        .tower-speed {
+            background-color: green;
+        }
+        .tower-damage {
+            background-color: red;
+        }
+        #tower-selection {
+            margin: 10px;
+        }
+        button {
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-wrapper">
+        <h1>Tower Defense</h1>
+        <div id="game-container">
+            <table id="grid"></table>
+        </div>
+        <div id="tower-selection">
+            <button onclick="selectTower('balanced')">Balanced (50 gold)</button>
+            <button onclick="selectTower('speed')">Speed (40 gold)</button>
+            <button onclick="selectTower('damage')">Damage (60 gold)</button>
+        </div>
+        <div>
+            <p>Gold: <span id="gold">100</span></p>
+            <p>Wave: <span id="wave">0</span>/3</p>
+            <p>Enemies reached end: <span id="escaped">0</span></p>
+        </div>
+    </div>
+    <script>
+        const ROWS = 10;
+        const COLS = 10;
+        const PATH_ROW = 5;
+        const CELL_SIZE = 40;
+
+        let gold = 100;
+        let selectedTower = 'balanced';
+        const towerTypes = {
+            balanced: { cost: 50, damage: 10, cooldown: 60, class: 'tower' },
+            speed: { cost: 40, damage: 5, cooldown: 30, class: 'tower-speed' },
+            damage: { cost: 60, damage: 20, cooldown: 90, class: 'tower-damage' }
+        };
+        let towers = [];
+        let enemies = [];
+        let currentWave = 0;
+        const MAX_WAVES = 3;
+        let enemiesToSpawn = 5;
+        let spawnTimer = 0;
+        let waveDelay = 0;
+        let escaped = 0;
+        const MAX_ESCAPED = 10;
+        let frame = 0;
+        let difficulty = 1.0;
+
+        const path = [];
+        for (let col = 0; col < COLS; col++) {
+            path.push({row: PATH_ROW, col: col});
+        }
+
+        const grid = document.getElementById('grid');
+        for (let row = 0; row < ROWS; row++) {
+            const tr = document.createElement('tr');
+            for (let col = 0; col < COLS; col++) {
+                const td = document.createElement('td');
+                if (row === PATH_ROW) {
+                    td.classList.add('path');
+                }
+                tr.appendChild(td);
+            }
+            grid.appendChild(tr);
+        }
+
+        grid.addEventListener('click', function(event) {
+            if (event.target.tagName === 'TD') {
+                const cell = event.target;
+                const row = cell.parentNode.rowIndex;
+                const col = cell.cellIndex;
+                if (row !== PATH_ROW && !cell.classList.contains('tower') && !cell.classList.contains('tower-speed') && !cell.classList.contains('tower-damage')) {
+                    const towerType = towerTypes[selectedTower];
+                    if (gold >= towerType.cost) {
+                        cell.classList.add(towerType.class);
+                        towers.push({row: row, col: col, type: selectedTower, range: 3, damage: towerType.damage, cooldown: 0});
+                        gold -= towerType.cost;
+                        updateUI();
+                    }
+                }
+            }
+        });
+
+        function selectTower(type) {
+            selectedTower = type;
+        }
+
+        function createEnemy() {
+            const enemy = document.createElement('div');
+            enemy.style.position = 'absolute';
+            enemy.style.width = '20px';
+            enemy.style.height = '20px';
+            enemy.style.backgroundColor = 'red';
+            enemy.style.left = '-10px';
+            enemy.style.top = (PATH_ROW * CELL_SIZE + 10) + 'px';
+            document.getElementById('game-container').appendChild(enemy);
+            return {element: enemy, pathIndex: 0, progress: 0, health: 50 * difficulty, speed: 0.01};
+        }
+
+        function update() {
+            enemies.forEach(enemy => {
+                enemy.progress += enemy.speed;
+                if (enemy.progress >= 1) {
+                    enemy.pathIndex++;
+                    enemy.progress -= 1;
+                    if (enemy.pathIndex >= path.length) {
+                        escaped++;
+                        enemy.element.remove();
+                        enemies = enemies.filter(e => e !== enemy);
+                        if (escaped >= MAX_ESCAPED) {
+                            alert('You lose!');
+                            return;
+                        }
+                    }
+                }
+                const col = enemy.pathIndex + enemy.progress;
+                enemy.element.style.left = (col * CELL_SIZE - 10) + 'px';
+            });
+
+            towers.forEach(tower => {
+                const towerType = towerTypes[tower.type];
+                if (tower.cooldown > 0) {
+                    tower.cooldown--;
+                } else {
+                    let target = null;
+                    let maxProgress = -1;
+                    enemies.forEach(enemy => {
+                        const enemyRow = PATH_ROW;
+                        const enemyCol = enemy.pathIndex + enemy.progress;
+                        const dist = Math.sqrt((enemyRow - tower.row)**2 + (enemyCol - tower.col)**2);
+                        if (dist <= tower.range) {
+                            const progress = enemy.pathIndex + enemy.progress;
+                            if (progress > maxProgress) {
+                                maxProgress = progress;
+                                target = enemy;
+                            }
+                        }
+                    });
+                    if (target) {
+                        target.health -= tower.damage;
+                        if (target.health <= 0) {
+                            target.element.remove();
+                            enemies = enemies.filter(e => e !== target);
+                            gold += 10;
+                        }
+                        tower.cooldown = towerType.cooldown;
+                    }
+                }
+            });
+
+            if (waveDelay > 0) {
+                waveDelay--;
+                if (waveDelay <= 0 && currentWave < MAX_WAVES - 1) {
+                    currentWave++;
+                    difficulty *= 1.2; // Increase difficulty by 20%
+                    enemiesToSpawn = 5 + currentWave * 5;
+                    spawnTimer = 0;
+                }
+            } else {
+                if (enemiesToSpawn > 0 && spawnTimer <= 0) {
+                    enemies.push(createEnemy());
+                    enemiesToSpawn--;
+                    spawnTimer = 120;
+                } else if (spawnTimer > 0) {
+                    spawnTimer--;
+                }
+                if (enemiesToSpawn == 0 && enemies.length == 0) {
+                    if (currentWave < MAX_WAVES - 1) {
+                        waveDelay = 300;
+                    } else {
+                        alert('You win!');
+                        return;
+                    }
+                }
+            }
+
+            updateUI();
+            frame++;
+            requestAnimationFrame(update);
+        }
+
+        function updateUI() {
+            document.getElementById('gold').textContent = gold;
+            document.getElementById('wave').textContent = currentWave;
+            document.getElementById('escaped').textContent = escaped;
+        }
+
+        update();
+    </script>
+</body>
+</html>
